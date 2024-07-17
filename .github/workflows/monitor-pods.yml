@@ -1,0 +1,49 @@
+name: Check Pods monitoring
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Check for failed pods
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          proxy_host: ${{ secrets.BASTION_IP }}
+          proxy_port: ${{ secrets.BASTION_PORT }}
+          proxy_username: ${{ secrets.BASTION_USER }}
+          proxy_password: ${{ secrets.BASTION_PASS }}
+          host: ${{ secrets.SERVER_9_IP }}
+          username: ${{ secrets.SERVER_USER }}
+          password: ${{ secrets.SERVER_PASS }}
+          run: |
+            kubectl get pods -A > output.log
+            crash_pods=$(kubectl get pods -A | awk 'NR!=1 {print $4}' | grep -v 'Running' | wc -l)
+            echo "crash-pods=${crash_pods}" >> $GITHUB_ENV
+            echo "crash_pods=${crash_pods}"
+
+      - name: Send Slack notification (failed pods)
+        if: env.crash_pods != '0'
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          fields: repo,message,commit,author,action,eventName,ref,workflow,job,took
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_MESSAGE: "There are failed pods in the Kubernetes cluster."
+          
+      - name: Send Slack notification (build success)
+        if: success()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: custom
+          fields: repo,message,commit,author
+          custom_payload: '{"text":"Build passed: ${{ github.repository }}:${{ github.sha }}"}'
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
